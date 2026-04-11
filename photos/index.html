@@ -263,7 +263,13 @@ const defaultLang = "zh";
       })();
     </script> <!-- Global Image Fade-in on Load --> <script>
       function initImageFadeIn() {
+        const images = Array.from(
+          document.querySelectorAll("img:not([data-no-fade])"),
+        );
+        const boundImages = new WeakSet();
+
         const reveal = (img) => {
+          if (img.classList.contains("loaded")) return;
           // Delay to next paint so cached images still animate from opacity 0 -> 1.
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -272,30 +278,66 @@ const defaultLang = "zh";
           });
         };
 
-        document.querySelectorAll("img:not([data-no-fade])").forEach((img) => {
+        const revealAfterDecode = (img) => {
+          const doReveal = () => reveal(img);
+
+          // Some browsers fire `load` before the image is fully decoded for paint.
+          // Waiting for decode avoids fade animation running before pixels are ready.
+          if (typeof img.decode === "function") {
+            img.decode().then(doReveal).catch(doReveal);
+          } else {
+            doReveal();
+          }
+        };
+
+        const bindLoadReveal = (img) => {
+          if (boundImages.has(img)) return;
+          boundImages.add(img);
+          const onDone = () => revealAfterDecode(img);
+          img.addEventListener("load", onDone, { once: true });
+          img.addEventListener("error", onDone, { once: true });
+        };
+
+        images.forEach((img) => {
           // Re-init state to guarantee fade on each page transition.
           img.classList.remove("loaded");
-
-          if (img.complete && img.naturalHeight !== 0) {
-            reveal(img);
-          } else {
-            img.addEventListener(
-              "load",
-              () => {
-                reveal(img);
-              },
-              { once: true },
-            );
-            img.addEventListener(
-              "error",
-              () => {
-              // Still show image on error (fallback behavior)
-                reveal(img);
-              },
-              { once: true },
-            );
-          }
         });
+
+        // Fallback for older browsers without IntersectionObserver.
+        if (!("IntersectionObserver" in window)) {
+          images.forEach((img) => {
+            if (img.complete && img.naturalHeight !== 0) {
+              revealAfterDecode(img);
+            } else {
+              bindLoadReveal(img);
+            }
+          });
+          return;
+        }
+
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (!entry.isIntersecting) return;
+
+              const img = entry.target;
+              if (!(img instanceof HTMLImageElement)) return;
+
+              // Only reveal when image is about to be seen.
+              if (img.complete && img.naturalHeight !== 0) {
+                revealAfterDecode(img);
+              } else {
+                bindLoadReveal(img);
+              }
+              observer.unobserve(img);
+            });
+          },
+          {
+            threshold: 0.01,
+          },
+        );
+
+        images.forEach((img) => observer.observe(img));
       }
 
       // Run on initial load
