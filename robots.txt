@@ -1,2 +1,4 @@
 User-agent: *
 Disallow: /~partytown/
+
+Sitemap: https://blog.awo.design/sitemap-index.xml
